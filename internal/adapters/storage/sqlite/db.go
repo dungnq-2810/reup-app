@@ -74,6 +74,14 @@ func (s *Storage) migrateSchema() error {
 	);
 	CREATE INDEX IF NOT EXISTS idx_history_slot ON history(scheduled_date, scheduled_time);
 
+	CREATE TABLE IF NOT EXISTS profiles (
+		id TEXT PRIMARY KEY,
+		label TEXT NOT NULL,
+		platform TEXT NOT NULL,
+		cookies_json TEXT NOT NULL,
+		created_at INTEGER NOT NULL
+	);
+
 	CREATE TABLE IF NOT EXISTS jobs (
 		id TEXT PRIMARY KEY,
 		video_json TEXT NOT NULL,
@@ -130,25 +138,19 @@ func (s *Storage) migrateLegacyJSON(settingsJSONPath, historyJSONPath string) er
 
 func (s *Storage) Load() (domain.Settings, error) {
 	defaultSettings := domain.Settings{
-		VideoFolder:       "/home/arch/Downloads/Movie Nights - Uploads from Movie Nights",
-		ChromeUserDataDir: "/home/arch/.config/google-chrome-mcp",
-		ChromePath:        "/opt/google/chrome/chrome",
-		DefaultTag:        "",
-		GoldenHours:           []string{"11:30", "18:30", "21:30"},
-		ScheduleGoldenHours:   []string{"11:30", "18:30", "21:30"},
-		PublishNowGoldenHours: []string{"07:30", "11:30", "14:30", "18:30", "21:30"},
-		MaxDays:               30,
-		Headless:              false,
-		CdpPort:               9222,
-		EnabledChannels:       []string{"tiktok", "youtube"},
-		CloseToTray:           true,
-		AutoStart:             false,
-		StartHidden:           true,
-		PublishMode:           domain.PublishModeSchedule,
-		AutoUploadEnabled:     false,
-		MissedSlotPolicy:      "skip",
+		DefaultTag:             "",
+		GoldenHours:            []string{"11:30", "18:30", "21:30"},
+		ScheduleGoldenHours:    []string{"11:30", "18:30", "21:30"},
+		PublishNowGoldenHours:  []string{"07:30", "11:30", "14:30", "18:30", "21:30"},
+		MaxDays:                30,
+		Headless:               false,
+		CdpPort:                9222,
+		EnabledChannels:        []string{}, // ID hồ sơ mặc định chọn sẵn — rỗng vì chưa có hồ sơ nào
+		PublishMode:            domain.PublishModeSchedule,
+		AutoUploadEnabled:      false,
+		MissedSlotPolicy:       "skip",
 		TikTokRestrictedPolicy: domain.TikTokRestrictedPolicySkip,
-		Locale:                "en",
+		Locale:                 "vi",
 	}
 
 	var val string
@@ -170,9 +172,6 @@ func (s *Storage) Load() (domain.Settings, error) {
 	if err := json.Unmarshal([]byte(val), &loaded); err != nil {
 		return defaultSettings, nil
 	}
-	if len(loaded.EnabledChannels) == 0 {
-		loaded.EnabledChannels = []string{"tiktok", "youtube"}
-	}
 	if loaded.PublishMode == "" {
 		loaded.PublishMode = domain.PublishModeSchedule
 	}
@@ -183,7 +182,7 @@ func (s *Storage) Load() (domain.Settings, error) {
 		loaded.TikTokRestrictedPolicy = domain.TikTokRestrictedPolicySkip
 	}
 	if loaded.Locale == "" {
-		loaded.Locale = "en"
+		loaded.Locale = "vi"
 	}
 
 	if !hasSchedule {
@@ -264,6 +263,57 @@ func (s *Storage) Append(rec domain.HistoryRecord) error {
 		INSERT INTO history(filename, title, scheduled_date, scheduled_time, channels, timestamp)
 		VALUES(?, ?, ?, ?, ?, ?)
 	`, rec.Filename, rec.Title, rec.ScheduledDate, rec.ScheduledTime, channelsStr, rec.Timestamp)
+	return err
+}
+
+// ----------------------------------------------------
+// ProfileRepository Implementation
+// ----------------------------------------------------
+
+func (s *Storage) ListProfiles() ([]domain.Profile, error) {
+	rows, err := s.db.Query("SELECT id, label, platform, cookies_json, created_at FROM profiles ORDER BY created_at DESC")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var profiles []domain.Profile
+	for rows.Next() {
+		var p domain.Profile
+		if err := rows.Scan(&p.ID, &p.Label, &p.Platform, &p.CookiesJSON, &p.CreatedAt); err != nil {
+			return nil, err
+		}
+		profiles = append(profiles, p)
+	}
+	return profiles, rows.Err()
+}
+
+func (s *Storage) GetProfile(id string) (*domain.Profile, error) {
+	var p domain.Profile
+	err := s.db.QueryRow("SELECT id, label, platform, cookies_json, created_at FROM profiles WHERE id = ?", id).
+		Scan(&p.ID, &p.Label, &p.Platform, &p.CookiesJSON, &p.CreatedAt)
+	if err == sql.ErrNoRows {
+		return nil, fmt.Errorf("không tìm thấy hồ sơ id=%s", id)
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &p, nil
+}
+
+func (s *Storage) SaveProfile(p domain.Profile) error {
+	_, err := s.db.Exec(`
+		INSERT INTO profiles(id, label, platform, cookies_json, created_at) VALUES(?, ?, ?, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET
+			label = excluded.label,
+			platform = excluded.platform,
+			cookies_json = excluded.cookies_json
+	`, p.ID, p.Label, p.Platform, p.CookiesJSON, p.CreatedAt)
+	return err
+}
+
+func (s *Storage) DeleteProfile(id string) error {
+	_, err := s.db.Exec("DELETE FROM profiles WHERE id = ?", id)
 	return err
 }
 

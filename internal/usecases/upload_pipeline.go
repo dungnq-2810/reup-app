@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"uptik/internal/adapters/browser"
 	"uptik/internal/domain"
 	"uptik/internal/ports"
 
@@ -18,6 +19,7 @@ type UploadPipelineUseCase struct {
 	registry    ports.PlatformRegistry
 	historyRepo ports.HistoryRepository
 	jobQueue    ports.JobQueue
+	profileRepo ports.ProfileRepository
 	logFn       func(level, msg string)
 }
 
@@ -25,12 +27,14 @@ func NewUploadPipelineUseCase(
 	registry ports.PlatformRegistry,
 	historyRepo ports.HistoryRepository,
 	jobQueue ports.JobQueue,
+	profileRepo ports.ProfileRepository,
 	logFn func(level, msg string),
 ) *UploadPipelineUseCase {
 	return &UploadPipelineUseCase{
 		registry:    registry,
 		historyRepo: historyRepo,
 		jobQueue:    jobQueue,
+		profileRepo: profileRepo,
 		logFn:       logFn,
 	}
 }
@@ -41,19 +45,18 @@ func (uc *UploadPipelineUseCase) Log(level, msg string) {
 	}
 }
 
-// ProcessJob uploads a single job across all its target channels sequentially
+// ProcessJob uploads a single job across all its target profiles (hồ sơ) sequentially. Mỗi hồ sơ
+// đăng qua 1 ngữ cảnh trình duyệt CÔ LẬP riêng (browser.NewProfileContext), tiêm đúng cookie của
+// hồ sơ đó trước khi mở trang — không dùng chung 1 browser/session cho mọi hồ sơ như uptik gốc, vì
+// ở đây 1 nền tảng có thể có nhiều hồ sơ/tài khoản khác nhau cùng lúc.
 func (uc *UploadPipelineUseCase) ProcessJob(ctx context.Context, b *rod.Browser, job *ports.JobItem) error {
 	item := &job.Video
-	targetChannels := job.TargetChannels
-	if len(targetChannels) == 0 {
-		targetChannels = []string{"tiktok"}
-	}
-
+	targetProfileIDs := job.TargetChannels
 	if item.Channels == nil {
 		item.Channels = make(map[string]domain.ChannelStatus)
 	}
 
-	uc.Log("info", fmt.Sprintf("🚀 [PIPELINE] Starting upload job: %s (%d channels: %s)", item.CustomTitle, len(targetChannels), strings.Join(targetChannels, ", ")))
+	uc.Log("info", fmt.Sprintf("🚀 [PIPELINE] Starting upload job: %s (%d hồ sơ: %s)", item.CustomTitle, len(targetProfileIDs), strings.Join(targetProfileIDs, ", ")))
 
 	// Mark state to uploading in queue
 	_ = uc.jobQueue.MarkState(ctx, job.ID, ports.JobStateUploading, "")
@@ -61,7 +64,7 @@ func (uc *UploadPipelineUseCase) ProcessJob(ctx context.Context, b *rod.Browser,
 	var successfulChannels []string
 	var failedChannels []string
 
-	for idx, ch := range targetChannels {
+	for idx, profileID := range targetProfileIDs {
 		select {
 		case <-ctx.Done():
 			_ = uc.jobQueue.MarkState(ctx, job.ID, ports.JobStateCancelled, "User cancelled upload operation")
@@ -69,39 +72,68 @@ func (uc *UploadPipelineUseCase) ProcessJob(ctx context.Context, b *rod.Browser,
 		default:
 		}
 
-		platform, err := uc.registry.Get(ch)
+		profile, err := uc.profileRepo.GetProfile(profileID)
 		if err != nil {
-			uc.Log("error", fmt.Sprintf("Skipping invalid platform %s: %v", ch, err))
+			uc.Log("error", fmt.Sprintf("Bỏ qua hồ sơ không tồn tại %s: %v", profileID, err))
+			item.Channels[profileID] = domain.ChannelStatus{Status: "error", ErrorMsg: "Hồ sơ đã bị xoá."}
+			failedChannels = append(failedChannels, profileID)
 			continue
 		}
 
-		uc.Log("info", fmt.Sprintf("▶️ [%d/%d] Uploading to %s...", idx+1, len(targetChannels), platform.DisplayName()))
-		item.Channels[ch] = domain.ChannelStatus{Status: "uploading"}
+		platform, err := uc.registry.Get(profile.Platform)
+		if err != nil {
+			uc.Log("error", fmt.Sprintf("Bỏ qua hồ sơ %s: nền tảng %s không hỗ trợ: %v", profile.Label, profile.Platform, err))
+			item.Channels[profileID] = domain.ChannelStatus{Status: "error", ErrorMsg: err.Error()}
+			failedChannels = append(failedChannels, profileID)
+			continue
+		}
 
-		uploadErr := platform.UploadVideo(ctx, b, item, uc.logFn)
+		uc.Log("info", fmt.Sprintf("▶️ [%d/%d] Đăng lên %s (hồ sơ: %s)...", idx+1, len(targetProfileIDs), platform.DisplayName(), profile.Label))
+		item.Channels[profileID] = domain.ChannelStatus{Status: "uploading"}
+
+		// Hồ sơ không có cookie (CookiesJSON rỗng) = dùng thẳng browser hiện có, coi như đã đăng
+		// nhập thủ công sẵn (giống cách uptik gốc hoạt động) — chỉ tạo ngữ cảnh cô lập + tiêm
+		// cookie khi hồ sơ THỰC SỰ có cookie riêng, để hỗ trợ nhiều tài khoản cùng nền tảng.
+		profileBrowser := b
+		if profile.CookiesJSON != "" {
+			ctxBrowser, ctxErr := browser.NewProfileContext(b, profile.CookiesJSON)
+			if ctxErr != nil {
+				uc.Log("error", fmt.Sprintf("❌ Không tạo được phiên trình duyệt cho hồ sơ %s: %v", profile.Label, ctxErr))
+				item.Channels[profileID] = domain.ChannelStatus{Status: "error", ErrorMsg: ctxErr.Error()}
+				failedChannels = append(failedChannels, profileID)
+				continue
+			}
+			profileBrowser = ctxBrowser
+		}
+
+		uploadErr := platform.UploadVideo(ctx, profileBrowser, item, uc.logFn)
+		if profileBrowser != b {
+			_ = profileBrowser.Close()
+		}
+
 		if uploadErr != nil {
-			uc.Log("error", fmt.Sprintf("❌ Upload failed on %s: %v", platform.DisplayName(), uploadErr))
+			uc.Log("error", fmt.Sprintf("❌ Upload failed on %s (%s): %v", platform.DisplayName(), profile.Label, uploadErr))
 			chStatus := "error"
 			if errors.Is(uploadErr, domain.ErrContentRestricted) {
 				chStatus = "restricted"
 			}
-			item.Channels[ch] = domain.ChannelStatus{
+			item.Channels[profileID] = domain.ChannelStatus{
 				Status:   chStatus,
 				ErrorMsg: uploadErr.Error(),
 			}
-			failedChannels = append(failedChannels, ch)
+			failedChannels = append(failedChannels, profileID)
 		} else {
-			uc.Log("success", fmt.Sprintf("✅ Upload succeeded on %s!", platform.DisplayName()))
-			item.Channels[ch] = domain.ChannelStatus{
+			uc.Log("success", fmt.Sprintf("✅ Upload succeeded on %s (%s)!", platform.DisplayName(), profile.Label))
+			item.Channels[profileID] = domain.ChannelStatus{
 				Status:     "scheduled",
 				UploadedAt: time.Now().Format("15:04:05"),
 			}
-			successfulChannels = append(successfulChannels, ch)
+			successfulChannels = append(successfulChannels, profileID)
 		}
 
-		// Courtesy delay between platforms to free resources & prevent spam detection
-		if idx < len(targetChannels)-1 {
-			uc.Log("info", "⏳ Pausing 5s before next channel to release resources...")
+		// Courtesy delay between profiles to free resources & prevent spam detection
+		if idx < len(targetProfileIDs)-1 {
+			uc.Log("info", "⏳ Pausing 5s before next profile to release resources...")
 			time.Sleep(5 * time.Second)
 		}
 	}

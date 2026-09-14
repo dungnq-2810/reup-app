@@ -24,12 +24,14 @@ func TestSQLiteStorage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load settings failed: %v", err)
 	}
-	if len(s.EnabledChannels) == 0 {
-		t.Errorf("Expected default enabled channels, got empty")
+	// EnabledChannels giờ chứa ID hồ sơ (không phải tên nền tảng) -> mặc định rỗng vì chưa có hồ
+	// sơ nào, khác hành vi cũ của uptik (luôn có sẵn "tiktok"/"youtube").
+	if len(s.EnabledChannels) != 0 {
+		t.Errorf("Expected empty default enabled channels (chứa ID hồ sơ), got %v", s.EnabledChannels)
 	}
 
 	s.DefaultTag = "#customtag"
-	s.EnabledChannels = []string{"tiktok", "youtube", "facebook"}
+	s.EnabledChannels = []string{"profile-1", "profile-2"}
 	if err := storage.Save(s); err != nil {
 		t.Fatalf("Save settings failed: %v", err)
 	}
@@ -38,7 +40,7 @@ func TestSQLiteStorage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Reload settings failed: %v", err)
 	}
-	if loaded.DefaultTag != "#customtag" || len(loaded.EnabledChannels) != 3 {
+	if loaded.DefaultTag != "#customtag" || len(loaded.EnabledChannels) != 2 {
 		t.Errorf("Loaded settings mismatch: %+v", loaded)
 	}
 

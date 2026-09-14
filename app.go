@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"uptik/internal/adapters/browser"
 	"uptik/internal/adapters/platforms"
 	"uptik/internal/adapters/platforms/facebook"
 	"uptik/internal/adapters/platforms/tiktok"
@@ -108,6 +109,7 @@ func (a *App) startup(ctx context.Context) {
 		a.registry,
 		a.storage,
 		a.jobQueue,
+		a.storage,
 		func(level, msg string) {
 			runtime.EventsEmit(a.ctx, "log_entry", domain.LogEntry{
 				Level:     level,
@@ -272,12 +274,20 @@ var (
 	streamTokensMu sync.RWMutex
 )
 
-func generateStreamToken(videoPath string) (string, error) {
+// generateRandomID trả về 1 chuỗi hex ngẫu nhiên 32 ký tự — dùng làm id cho hồ sơ, job...
+func generateRandomID() (string, error) {
 	b := make([]byte, 16)
 	if _, err := rand.Read(b); err != nil {
 		return "", err
 	}
-	token := hex.EncodeToString(b)
+	return hex.EncodeToString(b), nil
+}
+
+func generateStreamToken(videoPath string) (string, error) {
+	token, err := generateRandomID()
+	if err != nil {
+		return "", err
+	}
 
 	streamTokensMu.Lock()
 	defer streamTokensMu.Unlock()
@@ -478,6 +488,59 @@ func (a *App) GetSupportedPlatforms() []domain.PlatformInfo {
 		{ID: "tiktok", DisplayName: "TikTok Studio", LoginURL: "https://www.tiktok.com/tiktokstudio/upload"},
 		{ID: "facebook", DisplayName: "Facebook Reels", LoginURL: "https://business.facebook.com/latest/reels_composer"},
 	}
+}
+
+// ----------------------------------------------------
+// Hồ sơ (Profile) — tài khoản + cookie dùng để đăng bài
+// ----------------------------------------------------
+
+// ListProfiles trả về toàn bộ hồ sơ đã lưu.
+func (a *App) ListProfiles() ([]domain.Profile, error) {
+	if a.storage == nil {
+		return nil, fmt.Errorf("chưa khởi tạo được kho lưu trữ")
+	}
+	return a.storage.ListProfiles()
+}
+
+// AddProfile tạo 1 hồ sơ mới từ nhãn + nền tảng + cookie JSON dán vào.
+func (a *App) AddProfile(label, platformID, cookiesJSON string) (*domain.Profile, error) {
+	if a.storage == nil {
+		return nil, fmt.Errorf("chưa khởi tạo được kho lưu trữ")
+	}
+	if label == "" {
+		return nil, fmt.Errorf("thiếu tên hồ sơ")
+	}
+	if platformID != "tiktok" && platformID != "facebook" {
+		return nil, fmt.Errorf("nền tảng không hỗ trợ: %s", platformID)
+	}
+	if _, err := browser.ParseCookiesJSON(cookiesJSON); err != nil {
+		return nil, err
+	}
+
+	id, err := generateRandomID()
+	if err != nil {
+		return nil, fmt.Errorf("không tạo được id hồ sơ: %w", err)
+	}
+
+	p := domain.Profile{
+		ID:          id,
+		Label:       label,
+		Platform:    platformID,
+		CookiesJSON: cookiesJSON,
+		CreatedAt:   time.Now().Unix(),
+	}
+	if err := a.storage.SaveProfile(p); err != nil {
+		return nil, err
+	}
+	return &p, nil
+}
+
+// DeleteProfile xoá 1 hồ sơ theo id.
+func (a *App) DeleteProfile(id string) error {
+	if a.storage == nil {
+		return fmt.Errorf("chưa khởi tạo được kho lưu trữ")
+	}
+	return a.storage.DeleteProfile(id)
 }
 
 func (a *App) IsUploading() bool {

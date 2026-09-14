@@ -25,3 +25,11 @@ type JobRepository interface {
 	DeleteJob(id string) error
 	ClearCompleted() error
 }
+
+// ProfileRepository abstracts storage của các Hồ sơ (tài khoản + cookie) dùng để đăng bài
+type ProfileRepository interface {
+	ListProfiles() ([]domain.Profile, error)
+	GetProfile(id string) (*domain.Profile, error)
+	SaveProfile(p domain.Profile) error
+	DeleteProfile(id string) error
+}

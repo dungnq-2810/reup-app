@@ -93,7 +93,12 @@ func TestUseCases(t *testing.T) {
 	reg.Register(&mockPlatform{id: "youtube", name: "YouTube Shorts"})
 
 	jobQueue := queue.NewPersistentJobQueue(storage)
-	pipeUC := NewUploadPipelineUseCase(reg, storage, jobQueue, nil)
+	pipeUC := NewUploadPipelineUseCase(reg, storage, jobQueue, storage, nil)
+
+	// Hồ sơ test không có cookie -> pipeline dùng thẳng browser truyền vào (nil ở đây là hợp lệ
+	// vì mockPlatform không thật sự đụng vào browser).
+	_ = storage.SaveProfile(domain.Profile{ID: "tiktok", Label: "TikTok test", Platform: "tiktok", CreatedAt: time.Now().Unix()})
+	_ = storage.SaveProfile(domain.Profile{ID: "youtube", Label: "YouTube test", Platform: "youtube", CreatedAt: time.Now().Unix()})
 
 	ctx := context.Background()
 	enqueued, err := jobQueue.Enqueue(ctx, scheduled[0], []string{"tiktok", "youtube"})
@@ -204,7 +209,8 @@ func TestUploadPipelineQuarantine(t *testing.T) {
 	reg.Register(&mockRestrictedPlatform{id: "tiktok", name: "TikTok Studio"})
 
 	jobQueue := queue.NewPersistentJobQueue(storage)
-	pipeUC := NewUploadPipelineUseCase(reg, storage, jobQueue, nil)
+	pipeUC := NewUploadPipelineUseCase(reg, storage, jobQueue, storage, nil)
+	_ = storage.SaveProfile(domain.Profile{ID: "tiktok", Label: "TikTok test", Platform: "tiktok", CreatedAt: time.Now().Unix()})
 
 	ctx := context.Background()
 	item := domain.VideoItem{
@@ -277,7 +283,9 @@ func TestUploadPipelineQuarantine_CollisionAndPartial(t *testing.T) {
 	reg.Register(&mockPlatform{id: "youtube", name: "YouTube Shorts"})
 
 	jobQueue := queue.NewPersistentJobQueue(storage)
-	pipeUC := NewUploadPipelineUseCase(reg, storage, jobQueue, nil)
+	pipeUC := NewUploadPipelineUseCase(reg, storage, jobQueue, storage, nil)
+	_ = storage.SaveProfile(domain.Profile{ID: "tiktok", Label: "TikTok test", Platform: "tiktok", CreatedAt: time.Now().Unix()})
+	_ = storage.SaveProfile(domain.Profile{ID: "youtube", Label: "YouTube test", Platform: "youtube", CreatedAt: time.Now().Unix()})
 
 	item := domain.VideoItem{
 		Filename:    "sample.mp4",

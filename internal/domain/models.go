@@ -5,7 +5,19 @@ import "errors"
 // ErrContentRestricted is returned when video content is flagged as restricted/unoriginal by the platform
 var ErrContentRestricted = errors.New("content restricted: unoriginal or low-quality content detected")
 
-// ChannelStatus tracks progress and outcome on a specific platform
+// Profile là 1 tài khoản cụ thể (1 hồ sơ) trên 1 nền tảng, xác thực bằng cookie đã đăng nhập sẵn —
+// KHÔNG dùng 1 Chrome profile đăng nhập thật dùng chung như uptik gốc, vì cần quản lý NHIỀU tài
+// khoản cùng nền tảng cùng lúc. Mỗi job chọn đăng vào (các) Profile cụ thể, không chỉ chọn nền tảng.
+type Profile struct {
+	ID          string `json:"id"`
+	Label       string `json:"label"`
+	Platform    string `json:"platform"` // "tiktok" | "facebook"
+	CookiesJSON string `json:"cookiesJson"`
+	CreatedAt   int64  `json:"createdAt"`
+}
+
+// ChannelStatus tracks progress and outcome for 1 profile đích (khoá theo Profile.ID, không phải
+// tên nền tảng — 1 nền tảng có thể có nhiều Profile/tài khoản khác nhau).
 type ChannelStatus struct {
 	Status     string `json:"status"` // pending, ready, uploading, scheduled, error, skipped
 	ErrorMsg   string `json:"errorMsg,omitempty"`
@@ -34,7 +46,7 @@ type VideoItem struct {
 	GoldenHourSlot string                   `json:"goldenHourSlot"`
 	Status         string                   `json:"status"` // pending, ready, uploading, scheduled, partial, error, skipped
 	PublishMode    PublishMode              `json:"publishMode,omitempty"`
-	Channels       map[string]ChannelStatus `json:"channels,omitempty"`
+	Channels       map[string]ChannelStatus `json:"channels,omitempty"` // khoá theo Profile.ID
 	ErrorMsg       string                   `json:"errorMsg,omitempty"`
 	UploadedAt     string                   `json:"uploadedAt,omitempty"`
 }

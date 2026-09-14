@@ -28,7 +28,9 @@ func GetDefaultSettings() domain.Settings {
 		MaxDays:                30,
 		Headless:               false,
 		CdpPort:                9222,
-		EnabledChannels:        []string{"tiktok", "facebook"},
+		// EnabledChannels giờ chứa ID của các Hồ sơ (không phải tên nền tảng) sẽ được chọn sẵn
+		// khi đăng — rỗng mặc định vì chưa có hồ sơ nào, người dùng tự chọn sau khi tạo hồ sơ.
+		EnabledChannels:        []string{},
 		PublishMode:            domain.PublishModeSchedule,
 		AutoUploadEnabled:      false,
 		MissedSlotPolicy:       "skip",
