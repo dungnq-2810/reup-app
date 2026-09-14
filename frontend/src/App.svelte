@@ -150,6 +150,15 @@
 
   let videos = $state<VideoItem[]>([]);
   let history = $state<HistoryRecord[]>([]);
+
+  // Hồ sơ (tài khoản + cookie dùng để đăng bài) — độc lập với danh sách "platforms" cố định phía
+  // trên, mỗi hồ sơ là 1 tài khoản cụ thể, có thể có nhiều hồ sơ trên cùng 1 nền tảng.
+  let profiles = $state<domain.Profile[]>([]);
+  let newProfileLabel = $state<string>('');
+  let newProfilePlatform = $state<string>('tiktok');
+  let newProfileCookies = $state<string>('');
+  let isSavingProfile = $state<boolean>(false);
+  let selectedProfileIds = $state<string[]>([]);
   let logs = $state<LogEntry[]>([]);
   let isUploading = $state<boolean>(false);
   let isTriggeringNow = $state<boolean>(false);
@@ -262,6 +271,7 @@
       }
       await refreshVideos();
       await refreshHistory();
+      await refreshProfiles();
       await refreshSchedulerStatus();
     } catch (err) {
       addLog('error', `Failed to load initial settings: ${err}`);
@@ -277,6 +287,51 @@
     } catch (err) {
       addLog('error', `Error scanning video folder: ${err}`);
     }
+  }
+
+  async function refreshProfiles() {
+    try {
+      const list = await ListProfiles();
+      profiles = (list as unknown as domain.Profile[]) || [];
+    } catch (err) {
+      addLog('error', `Lỗi tải danh sách hồ sơ: ${err}`);
+    }
+  }
+
+  async function handleAddProfile() {
+    const label = newProfileLabel.trim();
+    const cookies = newProfileCookies.trim();
+    if (!label || !cookies || isSavingProfile) return;
+    isSavingProfile = true;
+    try {
+      JSON.parse(cookies); // báo lỗi sớm ở đây nếu dán nhầm/thiếu JSON, đỡ phải chờ gọi backend
+      await AddProfile(label, newProfilePlatform, cookies);
+      newProfileLabel = '';
+      newProfileCookies = '';
+      await refreshProfiles();
+      addLog('success', `Đã thêm hồ sơ "${label}".`);
+    } catch (err) {
+      addLog('error', `Lỗi thêm hồ sơ: ${err}`);
+    } finally {
+      isSavingProfile = false;
+    }
+  }
+
+  async function handleDeleteProfile(id: string, label: string) {
+    try {
+      await DeleteProfile(id);
+      selectedProfileIds = selectedProfileIds.filter(pid => pid !== id);
+      await refreshProfiles();
+      addLog('info', `Đã xoá hồ sơ "${label}".`);
+    } catch (err) {
+      addLog('error', `Lỗi xoá hồ sơ: ${err}`);
+    }
+  }
+
+  function toggleProfileSelected(id: string) {
+    selectedProfileIds = selectedProfileIds.includes(id)
+      ? selectedProfileIds.filter(pid => pid !== id)
+      : [...selectedProfileIds, id];
   }
 
   async function refreshHistory() {
@@ -301,6 +356,32 @@
       addLog('success', `Schedule allocated successfully! Ready videos: ${readyCount}`);
     } catch (err) {
       addLog('error', `Error generating schedule slots: ${err}`);
+    }
+  }
+
+  // Tải video từ link Douyin/TikTok/Facebook — thêm ADDITIVE vào queue hiện có, không đụng tới
+  // luồng quét thư mục local (ScanFolder/refreshVideos) đã có sẵn.
+  let addVideoURL = $state<string>('');
+  let isAddingVideo = $state<boolean>(false);
+
+  async function handleAddVideoFromURL() {
+    const raw = addVideoURL.trim();
+    if (!raw || isAddingVideo) return;
+    isAddingVideo = true;
+    try {
+      addLog('info', `Đang tải video từ link: ${raw}`);
+      const item = await AddVideoFromURL(raw);
+      if (videos.some(v => v.id === (item as any).id)) {
+        addLog('warn', 'Video này đã có trong hàng chờ.');
+      } else {
+        videos = [...videos, item as unknown as VideoItem];
+        addLog('success', `Đã tải xong: ${(item as any).customTitle}`);
+      }
+      addVideoURL = '';
+    } catch (err) {
+      addLog('error', `Lỗi tải video từ link: ${err}`);
+    } finally {
+      isAddingVideo = false;
     }
   }
 
@@ -332,15 +413,16 @@
       videos = queue;
     }
 
-    const channels = settings.enabledChannels && settings.enabledChannels.length > 0
-      ? settings.enabledChannels
-      : ['tiktok', 'youtube'];
+    if (selectedProfileIds.length === 0) {
+      addLog('warn', 'Chưa chọn Hồ sơ nào để đăng — vào tab Hồ sơ chọn ít nhất 1 hồ sơ.');
+      return;
+    }
 
-    const channelNames = channels.map(c => platforms.find(p => p.id === c)?.name || c).join(' + ');
+    const channelNames = selectedProfileIds.map(id => profiles.find(p => p.id === id)?.label || id).join(' + ');
     addLog('info', `Starting automated omnichannel upload pipeline (${channelNames}) for ${queue.length} videos...`);
     isUploading = true;
     try {
-      await StartOmnichannelUpload(queue as any, channels);
+      await StartOmnichannelUpload(queue as any, selectedProfileIds);
     } catch (err) {
       addLog('error', `Failed to initiate upload pipeline: ${err}`);
       isUploading = false;
@@ -634,12 +716,13 @@
 
   async function handleUploadSingleVideo(video: VideoItem) {
     if (isUploading) return;
+    if (selectedProfileIds.length === 0) {
+      addLog('warn', 'Chưa chọn Hồ sơ nào để đăng — vào tab Hồ sơ chọn ít nhất 1 hồ sơ.');
+      return;
+    }
 
-    const channels = settings.enabledChannels && settings.enabledChannels.length > 0
-      ? settings.enabledChannels
-      : ['tiktok', 'youtube'];
-    const channelNames = channels
-      .map(c => platforms.find(p => p.id === c)?.name || c)
+    const channelNames = selectedProfileIds
+      .map(id => profiles.find(p => p.id === id)?.label || id)
       .join(', ');
 
     const now = new Date();
@@ -666,7 +749,7 @@
     isUploading = true;
 
     try {
-      await StartOmnichannelUpload([targetVideo as any], channels);
+      await StartOmnichannelUpload([targetVideo as any], selectedProfileIds);
     } catch (err) {
       addLog('error', `Error starting single video upload: ${err}`);
       if (idx !== -1) {
@@ -1053,6 +1136,17 @@
           </Tabs.Trigger>
 
           <Tabs.Trigger
+            value="profiles"
+            class="flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-md transition duration-150 data-[selected]:bg-[#E50914] data-[selected]:text-white text-neutral-400 hover:text-white cursor-pointer"
+          >
+            <Share2 class="w-4 h-4" />
+            <span>Hồ sơ</span>
+            <span class="text-[10px] bg-black/40 px-1.5 py-0.5 rounded-full font-mono">
+              {profiles.length}
+            </span>
+          </Tabs.Trigger>
+
+          <Tabs.Trigger
             value="matrix"
             class="flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-md transition duration-150 data-[selected]:bg-[#E50914] data-[selected]:text-white text-neutral-400 hover:text-white cursor-pointer"
           >
@@ -1174,6 +1268,28 @@
               <span>{schedulerStatus.autoUploadEnabled ? m.scheduler_btn_stop() : m.scheduler_btn_start()}</span>
             </button>
           </div>
+        </div>
+
+        <!-- Thêm video từ link Douyin/TikTok/Facebook -->
+        <div class="mb-5 p-3 rounded-xl border border-neutral-800 bg-neutral-900/60 flex items-center gap-2">
+          <Download class="w-4 h-4 text-neutral-400 flex-shrink-0" />
+          <input
+            type="text"
+            bind:value={addVideoURL}
+            onkeydown={(e) => e.key === 'Enter' && handleAddVideoFromURL()}
+            placeholder="Dán link Douyin / TikTok / Facebook rồi bấm Tải..."
+            disabled={isAddingVideo}
+            class="flex-1 bg-[#1e1e1e] border border-neutral-700 rounded-lg px-3 py-2 text-xs text-white placeholder-neutral-500 focus:outline-none focus:border-[#E50914] transition disabled:opacity-50"
+          />
+          <button
+            type="button"
+            onclick={handleAddVideoFromURL}
+            disabled={isAddingVideo || !addVideoURL.trim()}
+            class="flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold bg-[#E50914] hover:bg-[#c40812] disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-lg transition active:scale-95 cursor-pointer flex-shrink-0"
+          >
+            <Download class="w-3.5 h-3.5 {isAddingVideo ? 'animate-bounce' : ''}" />
+            <span>{isAddingVideo ? 'Đang tải...' : 'Tải video'}</span>
+          </button>
         </div>
 
         <!-- Search & Filters -->
@@ -1555,6 +1671,84 @@
             </table>
           </div>
         {/if}
+      </Tabs.Content>
+
+      <!-- TAB: HỒ SƠ (Profile) — tài khoản + cookie dùng để đăng bài, chọn ở đây dùng chung cho
+           mọi lượt "Bắt đầu đăng" (StartOmnichannelUpload nhận danh sách profile ID này). -->
+      <Tabs.Content value="profiles" class="flex-1 flex flex-col gap-6">
+        <!-- Form thêm hồ sơ mới -->
+        <div class="p-4 rounded-xl border border-neutral-800 bg-neutral-900/60 space-y-3">
+          <h3 class="text-xs font-bold text-white uppercase tracking-wider">Thêm hồ sơ mới</h3>
+          <div class="grid grid-cols-1 md:grid-cols-[1fr_140px] gap-3">
+            <input
+              type="text"
+              bind:value={newProfileLabel}
+              placeholder="Tên hồ sơ (vd: Kênh phim, Mẹo vặt...)"
+              disabled={isSavingProfile}
+              class="bg-[#1e1e1e] border border-neutral-700 rounded-lg px-3 py-2 text-xs text-white placeholder-neutral-500 focus:outline-none focus:border-[#E50914] transition disabled:opacity-50"
+            />
+            <select
+              bind:value={newProfilePlatform}
+              disabled={isSavingProfile}
+              class="bg-[#1e1e1e] border border-neutral-700 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-[#E50914] transition disabled:opacity-50 cursor-pointer"
+            >
+              <option value="tiktok">TikTok</option>
+              <option value="facebook">Facebook</option>
+            </select>
+          </div>
+          <textarea
+            bind:value={newProfileCookies}
+            placeholder="Dán cookie JSON đã đăng nhập sẵn (mảng cookie, xuất từ extension như Cookie-Editor)..."
+            disabled={isSavingProfile}
+            rows="4"
+            class="w-full bg-[#1e1e1e] border border-neutral-700 rounded-lg px-3 py-2 text-xs text-white placeholder-neutral-500 focus:outline-none focus:border-[#E50914] transition disabled:opacity-50 font-mono"
+          ></textarea>
+          <button
+            type="button"
+            onclick={handleAddProfile}
+            disabled={isSavingProfile || !newProfileLabel.trim() || !newProfileCookies.trim()}
+            class="flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold bg-[#E50914] hover:bg-[#c40812] disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-lg transition active:scale-95 cursor-pointer"
+          >
+            <Plus class="w-3.5 h-3.5" />
+            <span>{isSavingProfile ? 'Đang lưu...' : 'Thêm hồ sơ'}</span>
+          </button>
+        </div>
+
+        <!-- Danh sách hồ sơ — tick chọn để dùng khi đăng bài -->
+        <div class="space-y-2">
+          <h3 class="text-xs font-bold text-white uppercase tracking-wider">
+            Danh sách hồ sơ ({profiles.length}) — chọn hồ sơ sẽ dùng khi bấm "Bắt đầu đăng"
+          </h3>
+          {#if profiles.length === 0}
+            <div class="flex flex-col items-center justify-center border border-dashed border-neutral-800 rounded-xl p-10 text-center">
+              <Share2 class="w-10 h-10 text-neutral-600 mb-2" />
+              <p class="text-xs text-neutral-500">Chưa có hồ sơ nào — thêm ở form phía trên.</p>
+            </div>
+          {:else}
+            {#each profiles as p (p.id)}
+              <div class="flex items-center gap-3 p-3 rounded-lg border bg-[#1a1a1a] {selectedProfileIds.includes(p.id) ? 'border-[#E50914]' : 'border-neutral-800'}">
+                <input
+                  type="checkbox"
+                  checked={selectedProfileIds.includes(p.id)}
+                  onchange={() => toggleProfileSelected(p.id)}
+                  class="w-4 h-4 accent-[#E50914] cursor-pointer flex-shrink-0"
+                />
+                <span class="text-[10px] uppercase font-bold px-2 py-0.5 rounded border flex-shrink-0 {p.platform === 'tiktok' ? 'bg-rose-950/80 text-rose-300 border-rose-800/80' : 'bg-blue-950/80 text-blue-300 border-blue-800/80'}">
+                  {p.platform}
+                </span>
+                <span class="text-xs font-semibold text-white flex-1 truncate">{p.label}</span>
+                <button
+                  type="button"
+                  onclick={() => handleDeleteProfile(p.id, p.label)}
+                  title="Xoá hồ sơ"
+                  class="p-1.5 text-neutral-500 hover:text-red-400 hover:bg-red-950/40 rounded-md transition cursor-pointer flex-shrink-0"
+                >
+                  <Trash2 class="w-3.5 h-3.5" />
+                </button>
+              </div>
+            {/each}
+          {/if}
+        </div>
       </Tabs.Content>
 
       <!-- TAB 2: 30 DAYS MATRIX -->

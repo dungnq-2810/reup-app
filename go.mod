@@ -3,7 +3,6 @@ module uptik
 go 1.26.0
 
 require (
-	github.com/emersion/go-autostart v0.0.0-20250403115856-34830d6457d2
 	github.com/go-rod/rod v0.116.2
 	github.com/wailsapp/wails/v2 v2.15.0
 	modernc.org/sqlite v1.58.0
