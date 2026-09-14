@@ -72,13 +72,14 @@
     TriggerAutoUploadNow,
     UpdateGoldenHours,
     GetAppVersion,
-    CheckForUpdates,
-    ApplyUpdate,
-    RestartApp
+    ListProfiles,
+    AddProfile,
+    DeleteProfile,
+    AddVideoFromURL
   } from '../wailsjs/go/main/App';
   import { EventsOn, EventsOff } from '../wailsjs/runtime/runtime';
   import type { VideoItem, Settings, HistoryRecord, LogEntry, UploadProgress } from './lib/types';
-  import type { updater } from '../wailsjs/go/models';
+  import type { domain } from '../wailsjs/go/models';
   import * as m from '$lib/paraglide/messages.js';
   import { i18n, SUPPORTED_LOCALES_LIST, type SupportedLocale } from './lib/i18n.svelte';
   import LanguageSwitcher from './lib/LanguageSwitcher.svelte';
@@ -177,9 +178,10 @@
   // Queue View Mode State ('grid' | 'list')
   let queueViewMode = $state<'grid' | 'list'>('grid');
 
-  // Auto-Update State (Level 2 Self-Update)
-  let appVersion = $state<string>('1.2.4');
-  let updateInfo = $state<updater.UpdateInfo | null>(null);
+  // Bản desktop cá nhân này KHÔNG có tự cập nhật (bỏ khi fork từ uptik) — các biến/hàm dưới đây
+  // chỉ còn giữ lại để UI cũ không vỡ, updateInfo không bao giờ được gán khác null nữa.
+  let appVersion = $state<string>('0.1.0');
+  let updateInfo = $state<any | null>(null);
   let isCheckingUpdate = $state<boolean>(false);
   let isApplyingUpdate = $state<boolean>(false);
   let updateProgress = $state<number>(0);
@@ -727,52 +729,17 @@
     await handleUpdateGoldenHours(preset);
   }
 
-  // Auto-Update Handlers (Level 2 Self-Update)
+  // Bản desktop cá nhân này không có backend tự cập nhật — giữ 3 hàm rỗng để các nút bấm cũ
+  // trong UI không vỡ, chỉ báo cho biết tính năng đã tắt thay vì gọi API không tồn tại.
   async function handleCheckUpdate(silent = false) {
-    if (isCheckingUpdate || isApplyingUpdate) return;
-    isCheckingUpdate = true;
-    updateCheckMessage = '';
-    try {
-      const info = await CheckForUpdates();
-      updateInfo = info;
-      if (info && !info.available && !silent) {
-        updateCheckMessage = m.settings_update_none({ version: info.currentVersion });
-      }
-    } catch (err: any) {
-      if (!silent) {
-        addLog('error', `Update check failed: ${err?.message || err}`);
-      }
-    } finally {
-      isCheckingUpdate = false;
+    if (!silent) {
+      updateCheckMessage = 'Bản desktop cá nhân này không có tính năng tự cập nhật.';
     }
   }
 
-  async function handleApplyUpdate() {
-    if (!updateInfo || !updateInfo.available || isApplyingUpdate) return;
-    isApplyingUpdate = true;
-    updateProgress = 0;
-    try {
-      addLog('info', `Downloading and installing UpTik v${updateInfo.latestVersion}...`);
-      const ok = await ApplyUpdate(updateInfo);
-      if (ok) {
-        isUpdateComplete = true;
-        addLog('success', `UpTik successfully updated to v${updateInfo.latestVersion}!`);
-      }
-    } catch (err: any) {
-      addLog('error', `Auto-update failed: ${err?.message || err}`);
-    } finally {
-      isApplyingUpdate = false;
-    }
-  }
+  async function handleApplyUpdate() {}
 
-  async function handleRestartApp() {
-    try {
-      addLog('info', 'Restarting UpTik application...');
-      await RestartApp();
-    } catch (err: any) {
-      addLog('error', `Failed to restart application: ${err?.message || err}`);
-    }
-  }
+  async function handleRestartApp() {}
 
   let logContainer = $state<HTMLElement | null>(null);
   $effect(() => {
