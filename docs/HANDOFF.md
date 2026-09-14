@@ -7,6 +7,26 @@ App desktop Go (Wails + Svelte), fork từ [uptik](https://github.com/tymon5368/
 (không multi-user/Telegram/backup như bản Node.js `tiktok-facebook-reuploader/` đang chạy song
 song). Xem lịch sử đầy đủ trong `git log` — 5 commit đầu là bản gốc fork + các tính năng đã build.
 
+**⚠️ QUAN TRỌNG — đọc `docs/reference-node-app/README.md` trước khi sửa bất cứ gì liên quan tới
+tải video hoặc đăng bài.** Repo này (`reup-app`, https://github.com/dungnq-2810/reup-app) là repo
+Git RIÊNG, tách khỏi project Node.js `tiktok-facebook-reuploader`
+(https://github.com/dungnq-2810/tiktok-facebook-reuploader — repo GitHub khác, có sẵn trên tài
+khoản `dungnq-2810`, clone về mà đọc trực tiếp nếu cần đối chiếu bản mới nhất, vì bản copy trong
+`docs/reference-node-app/` chỉ là ảnh chụp cũ). Code Go ở đây **port lại logic từ chính project
+Node.js đó**, và Node.js đó đã trải qua nhiều lần debug/sửa bug thực tế (đặc biệt là bug "báo đăng
+thành công giả" trên Facebook) mà bản Go **CHƯA áp dụng các bài học đó**. `docs/reference-node-app/`
+chứa bản sao các file Node.js liên quan + bảng "đã port / chưa port / bài học chưa áp dụng" — đọc
+kỹ trước khi động vào `internal/adapters/downloader/` hoặc `internal/adapters/platforms/`.
+
+### Cấu trúc repo này — cái gì là code THẬT, cái gì chỉ để THAM KHẢO
+
+- **Code thật của app** (build/chạy được): `main.go`, `app.go`, `settings.go`, `internal/`,
+  `frontend/` — mọi thứ NGOÀI thư mục `docs/`.
+- **Chỉ để tham khảo, KHÔNG phải code của app này, KHÔNG được build**: toàn bộ `docs/` — gồm cả
+  file `HANDOFF.md` này lẫn `docs/reference-node-app/` (bản copy tĩnh từ project Node.js khác, xem
+  chi tiết ở `docs/reference-node-app/README.md`). Sửa app thì sửa trong `internal/`/`frontend/`,
+  KHÔNG sửa gì trong `docs/reference-node-app/` (không có tác dụng, không ai chạy code đó cả).
+
 **Sau khi dùng thử, thấy quá phức tạp.** Yêu cầu mới: **cắt bớt, chỉ giữ 3 việc**:
 1. Đăng bài theo lịch (schedule)
 2. Cấu hình cookie (Hồ sơ)
@@ -48,6 +68,8 @@ Mọi thứ khác coi là thừa, cần dọn bớt.
 
 ## Việc cho phiên Claude Code tiếp theo
 
-Đọc file này trước, sau đó có thể bắt đầu ngay bằng cách hỏi Claude Code: *"đọc docs/HANDOFF.md,
-thực hiện phần 'Việc cần làm tiếp' — cắt tab Matrix, dọn Settings"*. Nên vào Plan mode trước khi
-sửa vì đụng tới nhiều chỗ trong file `App.svelte` 2800 dòng.
+Đọc file này TRƯỚC, rồi đọc `docs/reference-node-app/README.md` (bảng đã-port/chưa-port + bài học
+từ app Node.js chưa áp dụng cho app Go). Sau đó có thể bắt đầu ngay bằng cách hỏi Claude Code:
+*"đọc docs/HANDOFF.md và docs/reference-node-app/README.md, thực hiện phần 'Việc cần làm tiếp' —
+cắt tab Matrix, dọn Settings"*. Nên vào Plan mode trước khi sửa vì đụng tới nhiều chỗ trong file
+`App.svelte` 2800 dòng.
