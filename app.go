@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"uptik/internal/adapters/browser"
+	"uptik/internal/adapters/downloader"
 	"uptik/internal/adapters/platforms"
 	"uptik/internal/adapters/platforms/facebook"
 	"uptik/internal/adapters/platforms/tiktok"
@@ -206,6 +207,45 @@ func (a *App) ScanFolder(folder string) ([]domain.VideoItem, error) {
 		return nil, fmt.Errorf("chưa khởi tạo được kho lưu trữ")
 	}
 	return a.scanUC.Execute(folder, a.settings.DefaultTag)
+}
+
+// AddVideoFromURL tải 1 video từ link Douyin/TikTok/Facebook về VideoFolder và trả về VideoItem
+// tương ứng — thay cho ScanFolder (quét thư mục local) trong luồng chính: người dùng dán link
+// thay vì phải tự tải video về máy trước.
+func (a *App) AddVideoFromURL(rawURL string) (*domain.VideoItem, error) {
+	if strings.TrimSpace(rawURL) == "" {
+		return nil, fmt.Errorf("thiếu link video")
+	}
+	folder := a.settings.VideoFolder
+	if folder == "" {
+		folder = "./downloads"
+	}
+
+	res, err := downloader.Download(folder, rawURL)
+	if err != nil {
+		return nil, err
+	}
+
+	info, err := os.Stat(res.FilePath)
+	if err != nil {
+		return nil, fmt.Errorf("tải xong nhưng không đọc được file: %w", err)
+	}
+
+	title := strings.TrimSpace(res.Title)
+	if title == "" {
+		title = res.ID
+	}
+
+	return &domain.VideoItem{
+		ID:            domain.HashString(res.FilePath),
+		Filename:      filepath.Base(res.FilePath),
+		FullPath:      res.FilePath,
+		CleanTitle:    title,
+		CustomTitle:   title,
+		FileSize:      info.Size(),
+		FileSizeHuman: domain.FormatFileSize(info.Size()),
+		Status:        "pending",
+	}, nil
 }
 
 func (a *App) GenerateSlots(items []domain.VideoItem, startDateStr string) []domain.VideoItem {
