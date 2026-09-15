@@ -59,9 +59,6 @@
     OpenInFileManager,
     OpenInDefaultPlayer,
     GetVideoStreamURL,
-    OpenChromeForLogin,
-    OpenPlatformLogin,
-    CheckPlatformLogin,
     ResumeQueue,
     CancelQueue,
     GetPendingJobs,
@@ -71,7 +68,6 @@
     SetPublishMode,
     TriggerAutoUploadNow,
     UpdateGoldenHours,
-    GetAppVersion,
     ListProfiles,
     AddProfile,
     DeleteProfile,
@@ -186,16 +182,6 @@
 
   // Queue View Mode State ('grid' | 'list')
   let queueViewMode = $state<'grid' | 'list'>('grid');
-
-  // Bản desktop cá nhân này KHÔNG có tự cập nhật (bỏ khi fork từ uptik) — các biến/hàm dưới đây
-  // chỉ còn giữ lại để UI cũ không vỡ, updateInfo không bao giờ được gán khác null nữa.
-  let appVersion = $state<string>('0.1.0');
-  let updateInfo = $state<any | null>(null);
-  let isCheckingUpdate = $state<boolean>(false);
-  let isApplyingUpdate = $state<boolean>(false);
-  let updateProgress = $state<number>(0);
-  let isUpdateComplete = $state<boolean>(false);
-  let updateCheckMessage = $state<string>('');
 
   // Derived state
   let filteredVideos = $derived(
@@ -472,33 +458,6 @@
     } catch (err) {
       addLog('error', `Error clearing queue: ${err}`);
     }
-  }
-
-  function toggleChannel(id: string) {
-    if (settings.enabledChannels.includes(id)) {
-      if (settings.enabledChannels.length === 1) {
-        addLog('warn', 'At least one distribution channel must remain enabled.');
-        return;
-      }
-      settings.enabledChannels = settings.enabledChannels.filter(c => c !== id);
-    } else {
-      settings.enabledChannels = [...settings.enabledChannels, id];
-    }
-    handleSaveSettings();
-  }
-
-  async function handleOpenPlatform(id: string) {
-    const p = platforms.find(pl => pl.id === id);
-    addLog('info', `Opening browser session for ${p?.name || id}...`);
-    try {
-      await OpenPlatformLogin(id);
-    } catch (err) {
-      addLog('error', `Error opening browser for ${id}: ${err}`);
-    }
-  }
-
-  async function handleOpenChrome() {
-    handleOpenPlatform('tiktok');
   }
 
   let savePromise: Promise<void> = Promise.resolve();
@@ -812,18 +771,6 @@
     await handleUpdateGoldenHours(preset);
   }
 
-  // Bản desktop cá nhân này không có backend tự cập nhật — giữ 3 hàm rỗng để các nút bấm cũ
-  // trong UI không vỡ, chỉ báo cho biết tính năng đã tắt thay vì gọi API không tồn tại.
-  async function handleCheckUpdate(silent = false) {
-    if (!silent) {
-      updateCheckMessage = 'Bản desktop cá nhân này không có tính năng tự cập nhật.';
-    }
-  }
-
-  async function handleApplyUpdate() {}
-
-  async function handleRestartApp() {}
-
   let logContainer = $state<HTMLElement | null>(null);
   $effect(() => {
     if (logs.length && autoScrollLogs && logContainer) {
@@ -843,19 +790,6 @@
 
     loadInitialData();
     checkPendingRecovery();
-
-    GetAppVersion().then(v => {
-      if (v) appVersion = v;
-    });
-
-    EventsOn('update:progress', (percent: number) => {
-      updateProgress = percent;
-    });
-
-    // Check updates quietly in background after 3 seconds
-    setTimeout(() => {
-      handleCheckUpdate(true);
-    }, 3000);
 
     // Timer interval to refresh countdown and scheduler status
     schedulerTimerInterval = setInterval(() => {
@@ -994,64 +928,10 @@
       </div>
     {/if}
 
-    <!-- Channel Toggles in Header -->
-    <div class="hidden xl:flex items-center gap-1.5 bg-neutral-900/90 border border-neutral-800 rounded-lg p-1">
-      {#each platforms as p}
-        {@const isEnabled = settings.enabledChannels.includes(p.id)}
-        <button
-          onclick={() => toggleChannel(p.id)}
-          class="flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold rounded transition border cursor-pointer {isEnabled ? p.activeColor : 'text-neutral-500 border-transparent hover:text-neutral-300'}"
-          title={m.platform_toggle_tooltip({ name: p.name })}
-        >
-          <p.icon class="w-3.5 h-3.5" />
-          <span class="text-[11px]">{p.name}</span>
-        </button>
-      {/each}
-    </div>
-
     <!-- Top Action Buttons -->
     <div class="flex items-center gap-2">
       <!-- Language Selector -->
       <LanguageSwitcher onLocaleChange={handleLocaleChange} />
-
-      {#if updateInfo?.available}
-        <button
-          onclick={() => activeTab = 'settings'}
-          class="flex items-center gap-1.5 px-3 py-1 bg-cyan-500/15 hover:bg-cyan-500/25 border border-cyan-500/40 text-cyan-300 text-xs font-semibold rounded-full transition shadow-[0_0_12px_rgba(6,182,212,0.2)] animate-pulse cursor-pointer"
-          title={m.header_new_version_tooltip({ version: updateInfo.latestVersion })}
-        >
-          <Sparkles class="w-3.5 h-3.5 text-cyan-400" />
-          <span>{m.header_new_version_badge({ version: updateInfo.latestVersion })}</span>
-        </button>
-      {/if}
-
-      <!-- Quick Platform Open Dropdown / Buttons -->
-      <div class="hidden sm:flex items-center gap-1 bg-neutral-900 border border-neutral-800 rounded-lg p-0.5">
-        <button
-          onclick={() => handleOpenPlatform('tiktok')}
-          title={m.header_open_chrome_platform({ platform: 'TikTok Studio' })}
-          class="flex items-center gap-1.5 px-2.5 py-1 text-xs text-neutral-300 hover:text-white hover:bg-neutral-800 rounded transition cursor-pointer"
-        >
-          <Music2 class="w-3.5 h-3.5 text-rose-400" />
-          <span>{m.platform_tiktok()}</span>
-        </button>
-        <button
-          onclick={() => handleOpenPlatform('youtube')}
-          title={m.header_open_chrome_platform({ platform: 'YouTube Studio' })}
-          class="flex items-center gap-1.5 px-2.5 py-1 text-xs text-neutral-300 hover:text-white hover:bg-neutral-800 rounded transition cursor-pointer"
-        >
-          <PlaySquare class="w-3.5 h-3.5 text-red-500" />
-          <span>{m.platform_youtube()}</span>
-        </button>
-        <button
-          onclick={() => handleOpenPlatform('facebook')}
-          title={m.header_open_chrome_platform({ platform: 'Meta Business Suite' })}
-          class="flex items-center gap-1.5 px-2.5 py-1 text-xs text-neutral-300 hover:text-white hover:bg-neutral-800 rounded transition cursor-pointer"
-        >
-          <Share2 class="w-3.5 h-3.5 text-blue-400" />
-          <span>{m.platform_facebook()}</span>
-        </button>
-      </div>
 
       <button
         onclick={refreshVideos}
@@ -1147,14 +1027,6 @@
           </Tabs.Trigger>
 
           <Tabs.Trigger
-            value="matrix"
-            class="flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-md transition duration-150 data-[selected]:bg-[#E50914] data-[selected]:text-white text-neutral-400 hover:text-white cursor-pointer"
-          >
-            <Calendar class="w-4 h-4" />
-            <span>{m.tab_matrix()}</span>
-          </Tabs.Trigger>
-
-          <Tabs.Trigger
             value="history"
             class="flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-md transition duration-150 data-[selected]:bg-[#E50914] data-[selected]:text-white text-neutral-400 hover:text-white cursor-pointer"
           >
@@ -1182,9 +1054,6 @@
           >
             <SettingsIcon class="w-4 h-4" />
             <span>{m.tab_settings()}</span>
-            {#if updateInfo?.available}
-              <span class="w-2 h-2 rounded-full bg-cyan-400 animate-ping"></span>
-            {/if}
           </Tabs.Trigger>
         </Tabs.List>
 
@@ -1751,106 +1620,6 @@
         </div>
       </Tabs.Content>
 
-      <!-- TAB 2: 30 DAYS MATRIX -->
-      <Tabs.Content value="matrix" class="flex-1 flex flex-col">
-        <div class="mb-4 flex items-center justify-between">
-          <div>
-            <h2 class="text-base font-bold text-white">{m.matrix_title()}</h2>
-            <p class="text-xs text-neutral-400 mt-0.5">
-              {m.matrix_subtitle()}
-            </p>
-          </div>
-          <div class="flex items-center gap-4 text-xs">
-            <div class="flex items-center gap-1.5">
-              <div class="w-3 h-3 rounded bg-amber-500/20 border border-amber-500"></div>
-              <span class="text-neutral-300">11:30 {m.slot_noon()}</span>
-            </div>
-            <div class="flex items-center gap-1.5">
-              <div class="w-3 h-3 rounded bg-orange-500/20 border border-orange-500"></div>
-              <span class="text-neutral-300">18:30 {m.slot_afternoon()}</span>
-            </div>
-            <div class="flex items-center gap-1.5">
-              <div class="w-3 h-3 rounded bg-indigo-500/20 border border-indigo-500"></div>
-              <span class="text-neutral-300">21:30 {m.slot_night()}</span>
-            </div>
-          </div>
-        </div>
-
-        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3.5 overflow-y-auto max-h-[calc(100vh-230px)] pr-2">
-          {#each calendarMatrix as day}
-            <div class="bg-[#1a1a1a] border border-neutral-800 rounded-xl p-3.5 flex flex-col gap-2.5">
-              <!-- Day Header -->
-              <div class="flex items-center justify-between border-b border-neutral-800 pb-2">
-                <span class="text-xs font-bold text-neutral-200">{day.dateStr}</span>
-                <span class="text-[10px] text-neutral-500">
-                  {m.matrix_slots_count({ count: Object.keys(day.slots).length })}
-                </span>
-              </div>
-
-              <!-- 3 Golden Slots -->
-              <div class="flex flex-col gap-2">
-                <!-- Slot 11:30 -->
-                <div class="p-2 rounded-lg text-xs {day.slots['11:30']?.history ? 'bg-emerald-950/40 border border-emerald-800/60' : day.slots['11:30']?.video ? 'bg-amber-950/30 border border-amber-800/50' : 'bg-neutral-900 border border-neutral-800 text-neutral-600'}">
-                  <div class="flex items-center justify-between text-[11px] mb-1">
-                    <span class="font-semibold text-amber-400 flex items-center gap-1">
-                      <Sun class="w-3 h-3" /> 11:30
-                    </span>
-                    {#if day.slots['11:30']?.history}
-                      <span class="text-[9px] bg-emerald-900/60 text-emerald-300 px-1.5 py-0.2 rounded">{m.matrix_status_posted()}</span>
-                    {:else if day.slots['11:30']?.video}
-                      <span class="text-[9px] bg-blue-900/60 text-blue-300 px-1.5 py-0.2 rounded">{m.matrix_status_ready()}</span>
-                    {:else}
-                      <span class="text-[9px] text-neutral-600">{m.matrix_status_empty()}</span>
-                    {/if}
-                  </div>
-                  <p class="text-[11px] text-neutral-300 truncate">
-                    {day.slots['11:30']?.history?.title || day.slots['11:30']?.video?.customTitle || '—'}
-                  </p>
-                </div>
-
-                <!-- Slot 18:30 -->
-                <div class="p-2 rounded-lg text-xs {day.slots['18:30']?.history ? 'bg-emerald-950/40 border border-emerald-800/60' : day.slots['18:30']?.video ? 'bg-orange-950/30 border border-orange-800/50' : 'bg-neutral-900 border border-neutral-800 text-neutral-600'}">
-                  <div class="flex items-center justify-between text-[11px] mb-1">
-                    <span class="font-semibold text-orange-400 flex items-center gap-1">
-                      <Sunset class="w-3 h-3" /> 18:30
-                    </span>
-                    {#if day.slots['18:30']?.history}
-                      <span class="text-[9px] bg-emerald-900/60 text-emerald-300 px-1.5 py-0.2 rounded">{m.matrix_status_posted()}</span>
-                    {:else if day.slots['18:30']?.video}
-                      <span class="text-[9px] bg-blue-900/60 text-blue-300 px-1.5 py-0.2 rounded">{m.matrix_status_ready()}</span>
-                    {:else}
-                      <span class="text-[9px] text-neutral-600">{m.matrix_status_empty()}</span>
-                    {/if}
-                  </div>
-                  <p class="text-[11px] text-neutral-300 truncate">
-                    {day.slots['18:30']?.history?.title || day.slots['18:30']?.video?.customTitle || '—'}
-                  </p>
-                </div>
-
-                <!-- Slot 21:30 -->
-                <div class="p-2 rounded-lg text-xs {day.slots['21:30']?.history ? 'bg-emerald-950/40 border border-emerald-800/60' : day.slots['21:30']?.video ? 'bg-indigo-950/30 border border-indigo-800/50' : 'bg-neutral-900 border border-neutral-800 text-neutral-600'}">
-                  <div class="flex items-center justify-between text-[11px] mb-1">
-                    <span class="font-semibold text-indigo-400 flex items-center gap-1">
-                      <Moon class="w-3 h-3" /> 21:30
-                    </span>
-                    {#if day.slots['21:30']?.history}
-                      <span class="text-[9px] bg-emerald-900/60 text-emerald-300 px-1.5 py-0.2 rounded">{m.matrix_status_posted()}</span>
-                    {:else if day.slots['21:30']?.video}
-                      <span class="text-[9px] bg-blue-900/60 text-blue-300 px-1.5 py-0.2 rounded">{m.matrix_status_ready()}</span>
-                    {:else}
-                      <span class="text-[9px] text-neutral-600">{m.matrix_status_empty()}</span>
-                    {/if}
-                  </div>
-                  <p class="text-[11px] text-neutral-300 truncate">
-                    {day.slots['21:30']?.history?.title || day.slots['21:30']?.video?.customTitle || '—'}
-                  </p>
-                </div>
-              </div>
-            </div>
-          {/each}
-        </div>
-      </Tabs.Content>
-
       <!-- TAB 3: HISTORY -->
       <Tabs.Content value="history" class="flex-1 flex flex-col">
         <div class="mb-4 flex items-center justify-between">
@@ -2170,200 +1939,6 @@
                 </div>
               </div>
             </div>
-
-            <!-- CARD 2: SYSTEM LIFECYCLE & TRAY -->
-            <div class="bg-[#181818] border border-neutral-800 rounded-xl p-5 space-y-4 shadow-sm">
-              <div class="flex items-center justify-between border-b border-neutral-800/80 pb-3">
-                <div class="flex items-center gap-2.5">
-                  <div class="w-8 h-8 rounded-lg bg-neutral-800/80 border border-neutral-700/60 flex items-center justify-center text-amber-400">
-                    <Zap class="w-4 h-4" />
-                  </div>
-                  <div>
-                    <h3 class="text-xs font-bold text-white uppercase tracking-wider">{m.settings_section_system()}</h3>
-                    <p class="text-[11px] text-neutral-400 mt-0.5">{m.settings_section_system_desc()}</p>
-                  </div>
-                </div>
-              </div>
-
-              <div class="space-y-3">
-                <!-- Toggle 1: AutoStart -->
-                <div class="flex items-start justify-between gap-4 p-3.5 rounded-xl bg-neutral-900/50 border border-neutral-800">
-                  <div class="space-y-0.5 flex-1">
-                    <span class="text-xs font-semibold text-neutral-200 flex items-center gap-1.5">
-                      <Rocket class="w-4 h-4 text-[#E50914]" />
-                      <span>{m.settings_auto_start()}</span>
-                    </span>
-                    <p class="text-[11px] text-neutral-400">
-                      {m.settings_auto_start_desc()}
-                    </p>
-                  </div>
-                  <label class="relative inline-flex items-center cursor-pointer shrink-0 mt-0.5">
-                    <input
-                      type="checkbox"
-                      checked={settings.autoStart}
-                      onchange={async (e) => {
-                        settings.autoStart = e.currentTarget.checked;
-                        await handleSaveSettings();
-                      }}
-                      class="sr-only peer"
-                    />
-                    <div class="w-9 h-5 bg-neutral-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-neutral-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[#E50914]"></div>
-                  </label>
-                </div>
-
-                {#if settings.autoStart}
-                  <!-- Sub-toggle: Start Hidden -->
-                  <div class="flex items-start justify-between gap-4 p-3.5 ml-4 rounded-xl bg-neutral-900/30 border border-neutral-800/80 transition-all">
-                    <div class="space-y-0.5 flex-1">
-                      <span class="text-xs font-semibold text-neutral-300 flex items-center gap-1.5">
-                        <EyeOff class="w-3.5 h-3.5 text-neutral-400" />
-                        <span>{m.settings_start_hidden()}</span>
-                      </span>
-                      <p class="text-[11px] text-neutral-500">
-                        {m.settings_start_hidden_desc()}
-                      </p>
-                    </div>
-                    <label class="relative inline-flex items-center cursor-pointer shrink-0 mt-0.5">
-                      <input
-                        type="checkbox"
-                        checked={settings.startHidden}
-                        onchange={async (e) => {
-                          settings.startHidden = e.currentTarget.checked;
-                          await handleSaveSettings();
-                        }}
-                        class="sr-only peer"
-                      />
-                      <div class="w-9 h-5 bg-neutral-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-neutral-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[#E50914]"></div>
-                    </label>
-                  </div>
-                {/if}
-
-                <!-- Toggle 2: Close to Tray -->
-                <div class="flex items-start justify-between gap-4 p-3.5 rounded-xl bg-neutral-900/50 border border-neutral-800">
-                  <div class="space-y-0.5 flex-1">
-                    <span class="text-xs font-semibold text-neutral-200 flex items-center gap-1.5">
-                      <Shield class="w-4 h-4 text-emerald-400" />
-                      <span>{m.settings_close_tray()}</span>
-                    </span>
-                    <p class="text-[11px] text-neutral-400">
-                      {m.settings_close_tray_desc()}
-                    </p>
-                  </div>
-                  <label class="relative inline-flex items-center cursor-pointer shrink-0 mt-0.5">
-                    <input
-                      type="checkbox"
-                      checked={settings.closeToTray}
-                      onchange={async (e) => {
-                        settings.closeToTray = e.currentTarget.checked;
-                        await handleSaveSettings();
-                      }}
-                      class="sr-only peer"
-                    />
-                    <div class="w-9 h-5 bg-neutral-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-neutral-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[#E50914]"></div>
-                  </label>
-                </div>
-              </div>
-            </div>
-
-            <!-- CARD 3: SOFTWARE UPDATE -->
-            <div class="bg-[#181818] border border-neutral-800 rounded-xl p-5 space-y-4 shadow-sm">
-              <div class="flex items-center justify-between border-b border-neutral-800/80 pb-3">
-                <div class="flex items-center gap-2.5">
-                  <div class="w-8 h-8 rounded-lg bg-neutral-800/80 border border-neutral-700/60 flex items-center justify-center text-cyan-400">
-                    <Sparkles class="w-4 h-4" />
-                  </div>
-                  <div>
-                    <h3 class="text-xs font-bold text-white uppercase tracking-wider">{m.settings_check_update()}</h3>
-                    <p class="text-[11px] text-neutral-400 mt-0.5">
-                      {m.settings_current_version()} <span class="font-mono text-white font-semibold">v{appVersion}</span>
-                    </p>
-                  </div>
-                </div>
-
-                <button
-                  type="button"
-                  onclick={() => handleCheckUpdate(false)}
-                  disabled={isCheckingUpdate || isApplyingUpdate}
-                  class="px-3.5 py-1.5 bg-neutral-800 hover:bg-neutral-700 disabled:opacity-50 text-xs font-semibold text-neutral-200 rounded-lg border border-neutral-700 transition flex items-center gap-1.5 cursor-pointer"
-                >
-                  <RefreshCw class="w-3.5 h-3.5 {isCheckingUpdate ? 'animate-spin' : ''}" />
-                  <span>{isCheckingUpdate ? m.settings_update_checking() : m.settings_check_update()}</span>
-                </button>
-              </div>
-
-              {#if updateInfo}
-                {#if updateInfo.available}
-                  <div class="p-4 bg-cyan-950/30 border border-cyan-800/60 rounded-xl space-y-3">
-                    <div class="flex items-start justify-between gap-3">
-                      <div class="space-y-1 flex-1">
-                        <div class="flex items-center gap-2">
-                          <span class="px-2 py-0.5 bg-cyan-500 text-black text-[10px] font-extrabold rounded">{m.settings_update_new_badge()}</span>
-                          <span class="text-xs font-bold text-white">UpTik v{updateInfo.latestVersion}</span>
-                          {#if updateInfo.publishedAt}
-                            <span class="text-[10px] text-neutral-400">({new Date(updateInfo.publishedAt).toLocaleDateString()})</span>
-                          {/if}
-                        </div>
-                        {#if updateInfo.releaseNotes}
-                          <p class="text-[11px] text-neutral-300 line-clamp-3 leading-relaxed">
-                            {updateInfo.releaseNotes}
-                          </p>
-                        {/if}
-                      </div>
-
-                      {#if !isUpdateComplete}
-                        <button
-                          type="button"
-                          onclick={handleApplyUpdate}
-                          disabled={isApplyingUpdate}
-                          class="px-3.5 py-1.5 bg-cyan-500 hover:bg-cyan-400 disabled:opacity-50 text-xs font-bold text-black rounded-lg transition shrink-0 flex items-center gap-1.5 shadow-md active:scale-95 cursor-pointer"
-                        >
-                          <Download class="w-3.5 h-3.5" />
-                          <span>{isApplyingUpdate ? m.settings_update_applying() : m.settings_update_btn({ version: updateInfo.latestVersion })}</span>
-                        </button>
-                      {:else}
-                        <button
-                          type="button"
-                          onclick={handleRestartApp}
-                          class="px-3.5 py-1.5 bg-emerald-500 hover:bg-emerald-400 text-xs font-bold text-black rounded-lg transition shrink-0 flex items-center gap-1.5 shadow-md active:scale-95 animate-pulse cursor-pointer"
-                        >
-                          <RotateCcw class="w-3.5 h-3.5" />
-                          <span>{m.settings_btn_restart()}</span>
-                        </button>
-                      {/if}
-                    </div>
-
-                    {#if isApplyingUpdate}
-                      <div class="space-y-1.5 pt-1">
-                        <div class="flex justify-between text-[11px] text-neutral-300">
-                          <span>{m.settings_update_downloading()}</span>
-                          <span class="font-mono text-cyan-400">{updateProgress}%</span>
-                        </div>
-                        <div class="w-full bg-neutral-800 rounded-full h-1.5 overflow-hidden">
-                          <div class="bg-cyan-500 h-1.5 transition-all duration-300" style="width: {updateProgress}%"></div>
-                        </div>
-                      </div>
-                    {/if}
-
-                    {#if isUpdateComplete}
-                      <div class="text-[11px] text-emerald-400 flex items-center gap-1.5 pt-1">
-                        <CheckCircle class="w-3.5 h-3.5 shrink-0" />
-                        <span>{m.settings_update_success()}</span>
-                      </div>
-                    {/if}
-                  </div>
-                {:else if updateCheckMessage}
-                  <div class="text-[11px] text-neutral-400 flex items-center gap-1.5 py-1">
-                    <CheckCircle class="w-3.5 h-3.5 text-emerald-500 shrink-0" />
-                    <span>{updateCheckMessage}</span>
-                  </div>
-                {/if}
-              {:else if updateCheckMessage}
-                <div class="text-[11px] text-neutral-400 flex items-center gap-1.5 py-1">
-                  <CheckCircle class="w-3.5 h-3.5 text-emerald-500 shrink-0" />
-                  <span>{updateCheckMessage}</span>
-                </div>
-              {/if}
-            </div>
           </div>
 
           <!-- COLUMN 2: PUBLISHING & OMNICHANNEL AUTOMATION -->
@@ -2594,58 +2169,6 @@
                     <span>{m.settings_golden_hours_add()}</span>
                   </button>
                 </div>
-              </div>
-            </div>
-
-            <!-- CARD 6: OMNICHANNEL TARGETS -->
-            <div class="bg-[#181818] border border-neutral-800 rounded-xl p-5 space-y-4 shadow-sm">
-              <div class="flex items-center justify-between border-b border-neutral-800/80 pb-3">
-                <div class="flex items-center gap-2.5">
-                  <div class="w-8 h-8 rounded-lg bg-neutral-800/80 border border-neutral-700/60 flex items-center justify-center text-purple-400">
-                    <Share2 class="w-4 h-4" />
-                  </div>
-                  <div>
-                    <h3 class="text-xs font-bold text-white uppercase tracking-wider">{m.settings_section_channels()}</h3>
-                    <p class="text-[11px] text-neutral-400 mt-0.5">{m.settings_section_channels_desc()}</p>
-                  </div>
-                </div>
-                <span class="text-[10px] text-neutral-300 bg-neutral-900 border border-neutral-700 px-2.5 py-1 rounded-md font-mono">
-                  {m.settings_channels_count({ enabled: settings.enabledChannels.length, total: 3 })}
-                </span>
-              </div>
-
-              <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                {#each platforms as p}
-                  {@const isChecked = settings.enabledChannels.includes(p.id)}
-                  <label class="flex items-center gap-3 p-3.5 rounded-xl border cursor-pointer transition-all {isChecked ? 'bg-neutral-800/90 border-neutral-600 text-white shadow-sm' : 'bg-neutral-900/50 border-neutral-800 text-neutral-400 hover:text-neutral-200 hover:border-neutral-700'}">
-                    <input
-                      type="checkbox"
-                      checked={isChecked}
-                      onchange={() => toggleChannel(p.id)}
-                      class="rounded border-neutral-700 bg-neutral-900 text-[#E50914] focus:ring-0"
-                    />
-                    <p.icon class="w-5 h-5 text-neutral-300 shrink-0" />
-                    <div class="flex flex-col truncate">
-                      <span class="text-xs font-semibold text-white">{p.name}</span>
-                      <span class="text-[10px] text-neutral-500 font-mono">{p.id === 'tiktok' ? 'TikTok Studio' : p.id === 'youtube' ? 'YouTube Studio' : 'Business Suite'}</span>
-                    </div>
-                  </label>
-                {/each}
-              </div>
-
-              <div class="pt-2.5 border-t border-neutral-800 flex items-center gap-2 flex-wrap text-xs">
-                <span class="text-neutral-400 text-[11px]">{m.settings_quick_login()}</span>
-                {#each platforms as p}
-                  <button
-                    type="button"
-                    onclick={() => handleOpenPlatform(p.id)}
-                    class="flex items-center gap-1.5 px-3 py-1 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 text-xs rounded-lg border border-neutral-700 transition cursor-pointer"
-                  >
-                    <p.icon class="w-3.5 h-3.5" />
-                    <span>{p.name}</span>
-                    <ExternalLink class="w-3 h-3 text-neutral-500" />
-                  </button>
-                {/each}
               </div>
             </div>
           </div>
